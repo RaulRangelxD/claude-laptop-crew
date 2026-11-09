@@ -691,6 +691,10 @@ export const register: Register = (on, options) => {
           onSelect={v => void saveOption($, 'compact', v === 'compact')}
         />
         <Text bold>Posición</Text>
+        <Text dimColor>
+          ¿Salen debajo de ponytail u otro mod en vez de a un lado? En ~/.claude/settings.json, dentro de
+          "enabledPlugins", pon la línea de laptop-crew arriba de la de ponytail y reinicia Claude Code.
+        </Text>
         <Select
           key="aloneAlign"
           label="Sin nada más en la franja"

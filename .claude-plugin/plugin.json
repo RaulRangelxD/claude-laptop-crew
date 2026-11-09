@@ -1,6 +1,6 @@
 {
   "name": "laptop-crew",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Panel con la mascota de Claude trabajando en una laptop: una por chat y subagente, con un ! rojo cuando terminan",
   "author": {
     "name": "RaulRangelxD"
