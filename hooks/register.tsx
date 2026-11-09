@@ -41,6 +41,8 @@ type Config = {
   band: boolean
   spinner: boolean
   endRow: boolean
+  /** The side pane on the right, as in the first version. */
+  pane: boolean
 }
 
 /** A "#rgb" or "#rrggbb" color (the # optional) as "#rrggbb"; undefined for anything else. */
@@ -85,11 +87,16 @@ function readConfig(o: PluginOptions): Config {
     band: o.band !== false,
     spinner: o.spinner !== false,
     endRow: o.endRow !== false,
+    pane: o.pane === true,
   }
 }
 
 // Module state: starts over on a hot reload, which register and session.start set up again.
 let cfg = readConfig({})
+/** The options from settings, as register got them; `$.store`'s OVERRIDES go over them. */
+let baseOptions: PluginOptions = {}
+/** Options saved where the session has no /config row for the mod (the desktop app). */
+const OVERRIDES = 'options'
 /** Where the sounds Windows plays are prepared (big.wav, small.wav), once they are ready. */
 let soundDir: string | undefined
 let soundsReady = false
@@ -320,8 +327,51 @@ const OPTIONS = 'crew-options'
 
 /** Writes one option as the /config menu would; the engine reloads the mod with it. */
 async function saveOption($: EngineInterface, field: string, value: string | number | boolean) {
-  const result = await $.config.set({ key: `${$.plugin.name}.${field}`, value })
-  if ('deny' in result && result.deny) $.ui.toast(`laptop-crew: no se pudo guardar ${field}: ${result.deny}`)
+  let row: { key: string } | undefined
+  try {
+    // The row's key as the menu names it: loaded from a plugin folder it can be `laptop-crew@inline.<field>`.
+    const name = $.plugin.name
+    const rows = await $.config.list().catch(() => [])
+    row =
+      rows.find(r => r.key === `${name}.${field}`) ??
+      rows.find(r => r.key.endsWith(`.${field}`) && r.key.split('.')[0]!.split('@')[0] === name.split('@')[0])
+    const result = await $.config.set({ key: row?.key ?? `${name}.${field}`, value })
+    if ('deny' in result && result.deny) {
+      if (!row) return await saveOverride($, field, value)
+      $.ui.toast(`laptop-crew: no se pudo guardar ${field}: ${result.deny}`)
+      return
+    }
+    // Saved in settings: an older override must not shadow it.
+    await dropOverride($, field)
+  } catch (err) {
+    // The desktop app lists no /config rows for a mod loaded from a folder: keep it in the mod's store.
+    if (!row) return await saveOverride($, field, value).catch(e => $.ui.toast(`laptop-crew: error al guardar ${field}: ${String(e)}`))
+    $.ui.toast(`laptop-crew: error al guardar ${field}: ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
+
+async function readOverrides($: EngineInterface): Promise<PluginOptions> {
+  const saved = await $.store.get(OVERRIDES)
+  return saved && typeof saved === 'object' ? (saved as PluginOptions) : {}
+}
+
+/** Keeps one option in `$.store` and applies it now, as a /config change's reload would. */
+async function saveOverride($: EngineInterface, field: string, value: string | number | boolean) {
+  const next = { ...(await readOverrides($)), [field]: value }
+  await $.store.set(OVERRIDES, next)
+  cfg = readConfig({ ...baseOptions, ...next })
+  if (field === 'maxSmall' && cfg.maxSmall === 0) await update($, local, list => list.filter(w => w.id === MAIN))
+  if ((field === 'sound' || field === 'customSound' || field === 'volume' || field === 'smallVolume') && cfg.sound) {
+    void prepareSounds($).catch(() => {})
+  }
+  $.ui.invalidate('ui.render')
+}
+
+async function dropOverride($: EngineInterface, field: string) {
+  const saved = await readOverrides($).catch(() => ({}) as PluginOptions)
+  if (!(field in saved)) return
+  const { [field]: _, ...rest } = saved
+  await $.store.set(OVERRIDES, rest)
 }
 
 /** A number typed in the pane, kept inside its range; anything else is refused with a toast. */
@@ -445,6 +495,77 @@ async function testSound($: EngineInterface) {
   chime($, true)
 }
 
+/** This chat's mascot, and its subagents busy or just finished, alerts first. */
+function crewOf(mine: Worker[]): { main: Worker | undefined; others: Worker[] } {
+  const others = mine
+    .filter(w => w.id !== MAIN && w.status !== 'idle')
+    .sort((a, b) => Number(b.status === 'done') - Number(a.status === 'done'))
+  return { main: mine.find(w => w.id === MAIN), others }
+}
+
+const stateWord = (w: Worker) => (w.status === 'done' ? 'terminó' : w.status === 'working' ? 'trabajando' : 'en espera')
+
+/** The crew as one line of glyphs, for a surface that draws no SVG. */
+function crewText(main: Worker, others: Worker[]): string {
+  const glyph = (w: Worker) => (w.status === 'done' ? '❗' : w.status === 'working' ? '⌨' : 'z')
+  const shown = others.slice(0, cfg.maxSmall)
+  const extra = others.length - shown.length
+  const small = shown.map(w => `${glyph(w)} ${short(w.label)}`).join('  ')
+  return `${small}${extra > 0 ? ` +${extra}` : ''}  ${glyph(main)}`
+}
+
+/** The crew as one drawing, the same in the band and the side pane: normal or compact, as the person chose. */
+function crewArt(main: Worker, others: Worker[]): { source: string; alt: string; width: number; height: number } {
+  if (cfg.compact) {
+    // Compact: this chat as a mini, everyone else as one number on the minis' side (red when one finished).
+    const mw = CELL * SMALL
+    const tall = HEIGHT * SMALL
+    const numW = others.length > 0 ? 6 + 9 * String(others.length).length : 0
+    const mainX = cfg.miniSide === 'left' ? numW : 0
+    const numX = cfg.miniSide === 'left' ? numW / 2 : mw + numW / 2
+    const anyDone = others.some(w => w.status === 'done')
+    const count =
+      others.length > 0
+        ? `<text x="${numX}" y="${tall / 2 + 5}" text-anchor="middle" font-family="Arial Black, sans-serif" font-weight="900" font-size="14"
+            fill="${anyDone ? '#E5322D' : cfg.mascotColor}" stroke="#1A1A1A" stroke-width="2" paint-order="stroke" stroke-linejoin="round">${others.length}</text>`
+        : ''
+    const width = Math.ceil(mw + numW)
+    const height = Math.ceil(tall)
+    const source = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${tall}"><g transform="translate(${mainX} 0) scale(${SMALL})">${figure(main, 0, 0)}</g>${count}</svg>`
+    const alt = [`Este chat: ${stateWord(main)}`, others.length > 0 ? `${others.length} más ocupados` : ''].filter(Boolean).join(', ')
+    return { source, alt, width, height }
+  }
+  const shown = others.slice(0, cfg.maxSmall)
+  const extra = others.length - shown.length
+  const sw = CELL * SMALL
+  const sh = HEIGHT * SMALL
+  // The minis' column sits on the big mascot's left or right, as the person chose.
+  const column = shown.length > 0 ? sw + 4 : 0
+  const bigX = cfg.miniSide === 'left' ? column : 0
+  const miniX = cfg.miniSide === 'left' ? 0 : CELL + 4
+  const smalls = shown
+    .map((w, i) => `<g transform="translate(${miniX} ${i * sh}) scale(${SMALL})">${figure(w, 0, 0)}</g>`)
+    .join('')
+  // "+N" as big as the last small figure, centered over it, when more are busy than fit.
+  const badge =
+    extra > 0
+      ? `<g transform="translate(${miniX + sw / 2} ${(shown.length - 0.5) * sh})">
+          <text y="5.5" text-anchor="middle" font-family="Arial Black, sans-serif" font-weight="900" font-size="15" fill="${cfg.mascotColor}"
+            stroke="#1A1A1A" stroke-width="2" paint-order="stroke" stroke-linejoin="round">+${extra}</text>
+        </g>`
+      : ''
+  const width = column + CELL
+  const source = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${HEIGHT}" viewBox="0 0 ${width} ${HEIGHT}">${smalls}${badge}${figure(main, bigX, 0)}</svg>`
+  const alt = [`Este chat: ${stateWord(main)}`, ...others.map(w => `${w.label}: ${stateWord(w)}`)].join(', ')
+  return { source, alt, width, height: HEIGHT }
+}
+
+/** Opens or closes the side pane that shows the crew, as the `pane` option says. */
+async function showPane($: EngineInterface, isOn: boolean) {
+  if (isOn) await $.ui.open({ id: PANE, title: 'laptop-crew' })
+  else await $.ui.close({ id: PANE })
+}
+
 /**
  * The alert time after a "!", puts this chat's mascot back to sleep and drops a finished
  * subagent; `at` tells this alert from a newer one raised meanwhile.
@@ -460,9 +581,12 @@ async function endAlert($: EngineInterface, id: string, at: number) {
 }
 
 export const register: Register = (on, options) => {
+  baseOptions = options
   cfg = readConfig(options)
 
   on('session.start', async ($, e, next) => {
+    const saved = await $.store.get(OVERRIDES).catch(() => undefined)
+    if (saved && typeof saved === 'object') cfg = readConfig({ ...baseOptions, ...(saved as PluginOptions) })
     const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME'))
     if (home) {
       soundDir = `${home.replace(/\\/g, '/')}/.claude/laptop-crew-sounds`
@@ -471,8 +595,7 @@ export const register: Register = (on, options) => {
     if (cfg.maxSmall === 0) await update($, local, list => list.filter(w => w.id === MAIN))
     if (cfg.sound) void prepareSounds($).catch(() => {})
     if (cfg.sound && cfg.volume > 0) void startPlayer($, (await $.session.id()).slice(0, 12)).catch(() => {})
-    // The side pane of earlier versions: the mascots live in the band now.
-    void $.ui.close({ id: PANE }).catch(() => {})
+    void showPane($, cfg.pane).catch(() => {})
     await $.command.register({ name: 'crew', description: 'Opciones de las mascotas de laptop-crew' }).catch(() => {})
     return next(e)
   })
@@ -605,6 +728,7 @@ export const register: Register = (on, options) => {
             ['band', 'En la franja de encima del prompt', cfg.band],
             ['spinner', 'En el indicador de trabajo (mascota pequeña tecleando)', cfg.spinner],
             ['endRow', 'Fila con el ! al final del chat (la app de escritorio aún no la muestra)', cfg.endRow],
+            ['pane', 'En el panel lateral de la derecha', cfg.pane],
           ] as const
         ).map(([field, label, isOn]) => (
           <Select
@@ -615,7 +739,10 @@ export const register: Register = (on, options) => {
               { value: 'on', label: 'Activado' },
               { value: 'off', label: 'Desactivado' },
             ]}
-            onSelect={v => void saveOption($, field, v === 'on')}
+            onSelect={v => {
+              void saveOption($, field, v === 'on')
+              if (field === 'pane') void showPane($, v === 'on').catch(() => {})
+            }}
           />
         ))}
         <Text bold>Probar animaciones</Text>
@@ -689,6 +816,22 @@ export const register: Register = (on, options) => {
     )
   })
 
+  // The side pane: the same crew as the band, centered, on its own.
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const ui = $.ui.resolve(e)
+    const { Box, Text } = ui
+    const { main, others } = crewOf(await read($, local))
+    if (!main) return <Box />
+    if (!('Svg' in ui)) return <Text color={cfg.mascotColor}>{crewText(main, others)}</Text>
+    const { Svg } = ui
+    const art = crewArt(main, others)
+    return (
+      <Box flexDirection="row" justifyContent="center">
+        <Svg source={art.source} alt={art.alt} width={art.width} height={art.height} isInteractive />
+      </Box>
+    )
+  })
+
   // The rows this mod placed in the conversation: the latest "!" while it lasts, or a panel preview.
   on('ui.render', { component: 'Placed' }, async ($, e, next) => {
     if (e.props.plugin !== $.plugin.name) return next(e)
@@ -720,66 +863,19 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey || !cfg.band) return next(e)
     const below = await next(e)
-    const mine = await read($, local)
-    const main = mine.find(w => w.id === MAIN)
+    const { main, others } = crewOf(await read($, local))
     // Before session.start has seated this chat's mascot there is nothing to draw.
     if (!main) return below
-    // This chat's subagents, busy or just finished; alerts lead.
-    const others = mine.filter(w => w.id !== MAIN)
-      .filter(w => w.status !== 'idle')
-      .sort((a, b) => Number(b.status === 'done') - Number(a.status === 'done'))
-    const shown = others.slice(0, cfg.maxSmall)
-    const extra = others.length - shown.length
     const ui = $.ui.resolve(e)
     const { Box, Text } = ui
-    const state = (w: Worker) => (w.status === 'done' ? 'terminó' : w.status === 'working' ? 'trabajando' : 'en espera')
 
     let crew
     if (!('Svg' in ui)) {
-      const glyph = (w: Worker) => (w.status === 'done' ? '❗' : w.status === 'working' ? '⌨' : 'z')
-      const small = shown.map(w => `${glyph(w)} ${short(w.label)}`).join('  ')
-      crew = <Text color={cfg.mascotColor}>{`${small}${extra > 0 ? ` +${extra}` : ''}  ${glyph(main)}`}</Text>
-    } else if (cfg.compact) {
-      // Compact: this chat as a mini, everyone else as one number on the minis' side (red when one finished).
-      const { Svg } = ui
-      const mw = CELL * SMALL
-      const tall = HEIGHT * SMALL
-      const numW = others.length > 0 ? 6 + 9 * String(others.length).length : 0
-      const mainX = cfg.miniSide === 'left' ? numW : 0
-      const numX = cfg.miniSide === 'left' ? numW / 2 : mw + numW / 2
-      const anyDone = others.some(w => w.status === 'done')
-      const count =
-        others.length > 0
-          ? `<text x="${numX}" y="${tall / 2 + 5}" text-anchor="middle" font-family="Arial Black, sans-serif" font-weight="900" font-size="14"
-              fill="${anyDone ? '#E5322D' : cfg.mascotColor}" stroke="#1A1A1A" stroke-width="2" paint-order="stroke" stroke-linejoin="round">${others.length}</text>`
-          : ''
-      const width = Math.ceil(mw + numW)
-      const source = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${Math.ceil(tall)}" viewBox="0 0 ${width} ${tall}"><g transform="translate(${mainX} 0) scale(${SMALL})">${figure(main, 0, 0)}</g>${count}</svg>`
-      const alt = [`Este chat: ${state(main)}`, others.length > 0 ? `${others.length} más ocupados` : ''].filter(Boolean).join(', ')
-      crew = <Svg source={source} alt={alt} width={width} height={Math.ceil(tall)} isInteractive />
+      crew = <Text color={cfg.mascotColor}>{crewText(main, others)}</Text>
     } else {
       const { Svg } = ui
-      const sw = CELL * SMALL
-      const sh = HEIGHT * SMALL
-      // The minis' column sits on the big mascot's left or right, as the person chose.
-      const column = shown.length > 0 ? sw + 4 : 0
-      const bigX = cfg.miniSide === 'left' ? column : 0
-      const miniX = cfg.miniSide === 'left' ? 0 : CELL + 4
-      const smalls = shown
-        .map((w, i) => `<g transform="translate(${miniX} ${i * sh}) scale(${SMALL})">${figure(w, 0, 0)}</g>`)
-        .join('')
-      // "+N" as big as the last small figure, centered over it, when more are busy than fit.
-      const badge =
-        extra > 0
-          ? `<g transform="translate(${miniX + sw / 2} ${(shown.length - 0.5) * sh})">
-              <text y="5.5" text-anchor="middle" font-family="Arial Black, sans-serif" font-weight="900" font-size="15" fill="${cfg.mascotColor}"
-                stroke="#1A1A1A" stroke-width="2" paint-order="stroke" stroke-linejoin="round">+${extra}</text>
-            </g>`
-          : ''
-      const width = column + CELL
-      const source = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${HEIGHT}" viewBox="0 0 ${width} ${HEIGHT}">${smalls}${badge}${figure(main, bigX, 0)}</svg>`
-      const alt = [`Este chat: ${state(main)}`, ...others.map(w => `${w.label}: ${state(w)}`)].join(', ')
-      crew = <Svg source={source} alt={alt} width={width} height={HEIGHT} isInteractive />
+      const art = crewArt(main, others)
+      crew = <Svg source={art.source} alt={art.alt} width={art.width} height={art.height} isInteractive />
     }
 
     // The band's frame is the app's and spans the window either way. Alone (ponytail's band hidden

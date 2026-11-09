@@ -38,9 +38,9 @@ Escribe `/crew` para abrir el panel de opciones (también están en `/config`):
 | Tamaño | Normal, o compacto: este chat como mascota pequeña y sus subagentes como un número (rojo si alguno terminó) |
 | Colores | De la mascota y de la laptop, en hexadecimal |
 | Posición | Con la franja vacía (centro, derecha, izquierda), junto a otro contenido y lado de las pequeñas |
-| Dónde se muestran | En la franja, en el indicador de trabajo (mascota pequeña tecleando) y en una fila con el ! al final del chat (la app de escritorio todavía no dibuja esas filas); cada una se activa o desactiva |
+| Dónde se muestran | En la franja, en el indicador de trabajo (mascota pequeña tecleando), en una fila con el ! al final del chat (la app de escritorio todavía no dibuja esas filas) y en el panel lateral de la derecha (apagado de inicio); cada una se activa o desactiva |
 
-El panel también tiene botones para probar cada animación y el sonido.
+El panel también tiene botones para probar cada animación y el sonido. En la app de escritorio, donde `/config` no lista las opciones del mod, el panel las guarda en el almacén del propio mod.
 
 ## Notas
 
