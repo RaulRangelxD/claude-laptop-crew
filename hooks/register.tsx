@@ -14,11 +14,9 @@ const POLL_MS = 3000
 const STALE_MS = 2 * 60 * 60 * 1000
 const MASCOT_COLOR = '#D97757'
 const LAPTOP_COLOR = '#C9C9C9'
-/** One figure's box: 84 wide, 66 tall (the "!" on top to the laptop's base). */
+/** One figure's box: 84 wide, 64 tall, the "!" kept inside it (top) down to the laptop's base. */
 const CELL = 84
-const HEIGHT = 66
-/** Room above the figures: the "!" pops to 1.5x and hovers up 2px past the box's top. */
-const PAD = 10
+const HEIGHT = 64
 /** The small figures: a third of the big one, stacked on its left. */
 const SMALL = 1 / 3
 
@@ -39,6 +37,8 @@ type Config = {
   sharedSide: "left" | "right"
   /** Which side of the big mascot the minis stack on. */
   miniSide: "left" | "right"
+  /** Compact: this chat as a mini mascot and everyone else as one number beside it. */
+  compact: boolean
 }
 
 /** A "#rgb" or "#rrggbb" color (the # optional) as "#rrggbb"; undefined for anything else. */
@@ -79,6 +79,7 @@ function readConfig(o: PluginOptions): Config {
     aloneAlign: pick(o.aloneAlign, ["left", "center", "right"] as const, "center"),
     sharedSide: pick(o.sharedSide, ["left", "right"] as const, "right"),
     miniSide: pick(o.miniSide, ["left", "right"] as const, "left"),
+    compact: o.compact === true,
   }
 }
 
@@ -148,8 +149,8 @@ function figure(w: Worker, x: number, y: number): string {
 
   // A bold red "!" that pops in once the mascot has peeked out, then hovers.
   const alert = done
-    ? `<g transform="translate(${x + 42} ${y + 18})"><g transform="scale(0)">
-          <animateTransform attributeName="transform" type="scale" values="0;1.5;1" keyTimes="0;0.6;1" dur="0.35s" begin="0.4s" fill="freeze"/>
+    ? `<g transform="translate(${x + 42} ${y + 21})"><g transform="scale(0)">
+          <animateTransform attributeName="transform" type="scale" values="0;1.15;1" keyTimes="0;0.6;1" dur="0.35s" begin="0.4s" fill="freeze"/>
           <g>
             <animateTransform attributeName="transform" type="translate" values="0 0;0 -2;0 0" dur="1s" begin="0.75s" repeatCount="indefinite"/>
             <text x="0" y="0" text-anchor="middle" font-family="Arial Black, Impact, sans-serif" font-weight="900" font-size="24"
@@ -561,6 +562,16 @@ export const register: Register = (on, options) => {
           submitLabel="Guardar"
           onSubmit={v => void saveColor($, 'laptopColor', v, LAPTOP_COLOR)}
         />
+        <Select
+          key="compact"
+          label="Tamaño"
+          value={cfg.compact ? 'compact' : 'normal'}
+          options={[
+            { value: 'normal', label: 'Normal' },
+            { value: 'compact', label: 'Compacto (mascota pequeña y un número)' },
+          ]}
+          onSelect={v => void saveOption($, 'compact', v === 'compact')}
+        />
         <Text bold>Posición</Text>
         <Select
           key="aloneAlign"
@@ -674,6 +685,24 @@ export const register: Register = (on, options) => {
       const glyph = (w: Worker) => (w.status === 'done' ? '❗' : w.status === 'working' ? '⌨' : 'z')
       const small = shown.map(w => `${glyph(w)} ${short(w.label)}`).join('  ')
       crew = <Text color={cfg.mascotColor}>{`${small}${extra > 0 ? ` +${extra}` : ''}  ${glyph(main)}`}</Text>
+    } else if (cfg.compact) {
+      // Compact: this chat as a mini, everyone else as one number on the minis' side (red when one finished).
+      const { Svg } = ui
+      const mw = CELL * SMALL
+      const tall = HEIGHT * SMALL
+      const numW = others.length > 0 ? 6 + 9 * String(others.length).length : 0
+      const mainX = cfg.miniSide === 'left' ? numW : 0
+      const numX = cfg.miniSide === 'left' ? numW / 2 : mw + numW / 2
+      const anyDone = others.some(w => w.status === 'done')
+      const count =
+        others.length > 0
+          ? `<text x="${numX}" y="${tall / 2 + 5}" text-anchor="middle" font-family="Arial Black, sans-serif" font-weight="900" font-size="14"
+              fill="${anyDone ? '#E5322D' : cfg.mascotColor}" stroke="#1A1A1A" stroke-width="2" paint-order="stroke" stroke-linejoin="round">${others.length}</text>`
+          : ''
+      const width = Math.ceil(mw + numW)
+      const source = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${Math.ceil(tall)}" viewBox="0 0 ${width} ${tall}"><g transform="translate(${mainX} 0) scale(${SMALL})">${figure(main, 0, 0)}</g>${count}</svg>`
+      const alt = [`Este chat: ${state(main)}`, others.length > 0 ? `${others.length} más ocupados` : ''].filter(Boolean).join(', ')
+      crew = <Svg source={source} alt={alt} width={width} height={Math.ceil(tall)} isInteractive />
     } else {
       const { Svg } = ui
       const sw = CELL * SMALL
@@ -694,9 +723,9 @@ export const register: Register = (on, options) => {
             </g>`
           : ''
       const width = column + CELL
-      const source = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${HEIGHT + PAD}" viewBox="0 ${-PAD} ${width} ${HEIGHT + PAD}">${smalls}${badge}${figure(main, bigX, 0)}</svg>`
+      const source = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${HEIGHT}" viewBox="0 0 ${width} ${HEIGHT}">${smalls}${badge}${figure(main, bigX, 0)}</svg>`
       const alt = [`Este chat: ${state(main)}`, ...others.map(w => `${w.label}: ${state(w)}`)].join(', ')
-      crew = <Svg source={source} alt={alt} width={width} height={HEIGHT + PAD} isInteractive />
+      crew = <Svg source={source} alt={alt} width={width} height={HEIGHT} isInteractive />
     }
 
     // The band's frame is the app's and spans the window either way. Alone (ponytail's band hidden

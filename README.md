@@ -35,6 +35,7 @@ Escribe `/crew` para abrir el panel de opciones (también están en `/config`):
 | Audio propio | Ruta a un `.wav` de 16 bits; la versión aguda se crea sola |
 | Duración del ! | Segundos antes de volver a dormir |
 | Mascotas pequeñas | De 0 a 3; con 0 solo se muestra este chat |
+| Tamaño | Normal, o compacto: este chat como mascota pequeña y los demás como un número (rojo si alguno terminó) |
 | Colores | De la mascota y de la laptop, en hexadecimal |
 | Posición | Con la franja vacía (centro, derecha, izquierda), junto a otro contenido y lado de las pequeñas |
 
