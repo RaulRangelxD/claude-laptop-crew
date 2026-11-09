@@ -1,6 +1,6 @@
 {
   "name": "laptop-crew",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Panel con la mascota de Claude trabajando en una laptop: una por chat y subagente, con un ! rojo cuando terminan",
   "author": {
     "name": "RaulRangelxD"
@@ -99,6 +99,24 @@
       "title": "Modo compacto",
       "description": "Este chat como mascota pequeña y los demás como un número al lado, para una franja más baja",
       "default": false
+    },
+    "band": {
+      "type": "boolean",
+      "title": "Mascotas en la franja",
+      "description": "Mostrar las mascotas en la franja de encima del prompt",
+      "default": true
+    },
+    "spinner": {
+      "type": "boolean",
+      "title": "Mascota en el indicador de trabajo",
+      "description": "Una mascota pequeña tecleando junto al indicador mientras Claude trabaja",
+      "default": true
+    },
+    "endRow": {
+      "type": "boolean",
+      "title": "Fila con el ! al final del chat",
+      "description": "Al terminar, la mascota asomada con el ! en una fila al final de la conversación",
+      "default": true
     }
   }
 }

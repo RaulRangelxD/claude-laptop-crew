@@ -8,6 +8,13 @@ export type Worker = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'laptop-crew': { local: Worker[]; chats: Worker[] }
+    'laptop-crew': {
+      local: Worker[]
+      chats: Worker[]
+      /** The transcript row (`$.ui.place` id) that shows the latest "!", while it lasts. */
+      doneRow: string | null
+      /** A preview row from the /crew panel: its id and what it shows, while it lasts. */
+      demoRow: { id: string; kind: 'working' | 'done' } | null
+    }
   }
 }

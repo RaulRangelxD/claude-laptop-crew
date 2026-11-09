@@ -6,6 +6,8 @@ import { fromBase64, pitchWav, toBase64 } from './wav'
 
 const local = atom({ plugin: 'laptop-crew', key: 'local' } as const, [] as Worker[])
 const chats = atom({ plugin: 'laptop-crew', key: 'chats' } as const, [] as Worker[])
+const doneRow = atom({ plugin: 'laptop-crew', key: 'doneRow' } as const, null as string | null)
+const demoRow = atom({ plugin: 'laptop-crew', key: 'demoRow' } as const, null as { id: string; kind: 'working' | 'done' } | null)
 
 const PANE = 'crew'
 const MAIN = 'main'
@@ -39,6 +41,10 @@ type Config = {
   miniSide: "left" | "right"
   /** Compact: this chat as a mini mascot and everyone else as one number beside it. */
   compact: boolean
+  /** Where the mascots show: the band above the prompt, the working indicator, a "!" row at the end of the chat. */
+  band: boolean
+  spinner: boolean
+  endRow: boolean
 }
 
 /** A "#rgb" or "#rrggbb" color (the # optional) as "#rrggbb"; undefined for anything else. */
@@ -80,6 +86,9 @@ function readConfig(o: PluginOptions): Config {
     sharedSide: pick(o.sharedSide, ["left", "right"] as const, "right"),
     miniSide: pick(o.miniSide, ["left", "right"] as const, "left"),
     compact: o.compact === true,
+    band: o.band !== false,
+    spinner: o.spinner !== false,
+    endRow: o.endRow !== false,
   }
 }
 
@@ -408,6 +417,7 @@ async function demoDone($: EngineInterface) {
   const at = await $.clock.now()
   await setLocal($, MAIN, { status: 'done', at })
   chime($, false)
+  await placeDoneRow($, at)
   $.clock.after(cfg.alertMs, () => void endAlert($, MAIN, at).catch(() => {}))
 }
 
@@ -430,7 +440,43 @@ async function demoFinishOne($: EngineInterface) {
 }
 
 /** Ends every preview: helpers gone, this chat's mascot asleep. */
+/** One figure as its own drawing: full size, or a mini when `small` (the working indicator, compact mode). */
+function figureSvg(w: Worker, small: boolean): { source: string; width: number; height: number } {
+  const width = Math.round(small ? CELL * SMALL : CELL)
+  const height = Math.round(small ? HEIGHT * SMALL : HEIGHT)
+  return {
+    source: `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${CELL} ${HEIGHT}">${figure(w, 0, 0)}</svg>`,
+    width,
+    height,
+  }
+}
+
+/**
+ * Puts this chat's "!" in a row at the end of the conversation, which shows while the "!" lasts.
+ * Where the surface draws no placed rows (the desktop app, as of Claude Code 2.1.317) it answers
+ * isPlaced false and nothing shows; the band's "!" stays the alert there.
+ */
+async function placeDoneRow($: EngineInterface, at: number) {
+  if (!cfg.endRow) return
+  const id = `done-${at}`
+  await update($, doneRow, () => id)
+  await $.ui.place({ id }).catch(() => undefined)
+}
+
+/** Previews the "!" row (for the alert time); says so where the app draws no such rows. */
+async function demoRowPreview($: EngineInterface, kind: 'working' | 'done') {
+  const id = `demo-${kind}-${await $.clock.now()}`
+  await update($, demoRow, () => ({ id, kind }))
+  const placed = await $.ui.place({ id }).catch(() => ({ isPlaced: false as const, reason: 'error' }))
+  if (!placed.isPlaced) $.ui.toast('laptop-crew: esta app todavía no muestra filas de mods en el chat')
+  if (kind === 'done') chime($, false)
+  $.clock.after(kind === 'done' ? cfg.alertMs : 10_000, () =>
+    void update($, demoRow, row => (row?.id === id ? null : row)).catch(() => {}),
+  )
+}
+
 async function demoStop($: EngineInterface) {
+  await update($, demoRow, () => null)
   await update($, local, list => list.filter(w => !isDemo(w)))
   await setLocal($, MAIN, { status: 'idle' })
 }
@@ -604,12 +650,34 @@ export const register: Register = (on, options) => {
           ]}
           onSelect={v => void saveOption($, 'miniSide', v)}
         />
+        <Text bold>Dónde se muestran</Text>
+        {(
+          [
+            ['band', 'En la franja de encima del prompt', cfg.band],
+            ['spinner', 'En el indicador de trabajo (mascota pequeña tecleando)', cfg.spinner],
+            ['endRow', 'Fila con el ! al final del chat (la app de escritorio aún no la muestra)', cfg.endRow],
+          ] as const
+        ).map(([field, label, isOn]) => (
+          <Select
+            key={field}
+            label={label}
+            value={isOn ? 'on' : 'off'}
+            options={[
+              { value: 'on', label: 'Activado' },
+              { value: 'off', label: 'Desactivado' },
+            ]}
+            onSelect={v => void saveOption($, field, v === 'on')}
+          />
+        ))}
         <Text bold>Probar animaciones</Text>
         <Box flexDirection="row" gap="sm" flexWrap="wrap">
           <Button key="demoWorking" label="Trabajando" onPress={() => void demoWorking($)} />
           <Button key="demoDone" label="Terminó (!)" onPress={() => void demoDone($)} />
           <Button key="demoCrowd" label="Ayudantes (+N)" onPress={() => void demoCrowd($)} />
           <Button key="demoStop" label="Detener" onPress={() => void demoStop($)} />
+        </Box>
+        <Box flexDirection="row" gap="sm" flexWrap="wrap">
+          <Button key="demoEndRow" label="Probar fila del !" onPress={() => void demoRowPreview($, 'done')} />
         </Box>
         <Input
           key="demoCount"
@@ -658,13 +726,56 @@ export const register: Register = (on, options) => {
     if (id === MAIN) await publish($, status)
     if (status === 'done') chime($, id !== MAIN)
     if (status === 'done') $.clock.after(cfg.alertMs, () => void endAlert($, id, at).catch(() => {}))
+    if (status === 'done' && id === MAIN) await placeDoneRow($, at)
     return next(e)
+  })
+
+  // The working indicator: a mini mascot typing beside the engine's own line, while a turn runs.
+  on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
+    const own = await next(e)
+    if (!cfg.spinner) return own
+    const ui = $.ui.resolve(e)
+    if (!('Svg' in ui)) return own
+    const { Box, Svg } = ui
+    const art = figureSvg({ id: MAIN, label: '', status: 'working' }, true)
+    return (
+      <Box flexDirection="row" alignItems="center" gap="sm">
+        <Svg source={art.source} alt="Claude trabajando" width={art.width} height={art.height} isInteractive />
+        {own}
+      </Box>
+    )
+  })
+
+  // The rows this mod placed in the conversation: the latest "!" while it lasts, or a panel preview.
+  on('ui.render', { component: 'Placed' }, async ($, e, next) => {
+    if (e.props.plugin !== $.plugin.name) return next(e)
+    const demo = await read($, demoRow)
+    const main = (await read($, local)).find(w => w.id === MAIN)
+    let shown: Worker | undefined
+    if (demo?.id === e.props.id) shown = { id: MAIN, label: '', status: demo.kind, at: 0 }
+    else if (e.props.id === (await read($, doneRow)) && main?.status === 'done') shown = main
+    // An older row, or one whose "!" is over, draws nothing: no trail of mascots up the conversation.
+    if (!shown) return next(e)
+    const ui = $.ui.resolve(e)
+    const { Box, Text } = ui
+    if (!('Svg' in ui)) {
+      return <Text color={cfg.mascotColor}>{shown.status === 'done' ? '❗ Claude terminó' : '⌨ Claude trabajando…'}</Text>
+    }
+    const { Svg } = ui
+    // The working preview stands for the indicator, so it is drawn at the indicator's mini size.
+    const art = figureSvg(shown, shown.status === 'working' || cfg.compact)
+    return (
+      <Box flexDirection="row" alignItems="center" gap="sm">
+        <Svg source={art.source} alt={shown.status === 'done' ? 'Claude terminó' : 'Claude trabajando'} width={art.width} height={art.height} isInteractive />
+        {shown.status === 'working' ? <Text dimColor>Así se verá el indicador mientras trabajo</Text> : null}
+      </Box>
+    )
   })
 
   // The band above the prompt, shared: whatever the plugins beneath draw there
   // (ponytail's menu) stays whole on the left, the mascots sit on the right.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (e.props.hasSurvey) return next(e)
+    if (e.props.hasSurvey || !cfg.band) return next(e)
     const below = await next(e)
     const mine = await read($, local)
     const main = mine.find(w => w.id === MAIN)
