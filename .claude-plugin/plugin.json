@@ -1,0 +1,98 @@
+{
+  "name": "laptop-crew",
+  "version": "1.0.0",
+  "description": "Panel con la mascota de Claude trabajando en una laptop: una por chat y subagente, con un ! rojo cuando terminan",
+  "author": {
+    "name": "RaulRangelxD"
+  },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "sound": {
+      "type": "boolean",
+      "title": "Sonido",
+      "description": "Sonar al salir el !",
+      "default": true
+    },
+    "alertSeconds": {
+      "type": "number",
+      "title": "Duración del !",
+      "description": "Segundos que dura el ! antes de volver a dormir",
+      "default": 60,
+      "min": 5,
+      "max": 3600
+    },
+    "maxSmall": {
+      "type": "number",
+      "title": "Mascotas pequeñas",
+      "description": "Cuántas mascotas pequeñas mostrar (subagentes y otros chats). 0: solo este chat",
+      "default": 3,
+      "min": 0,
+      "max": 3
+    },
+    "volume": {
+      "type": "number",
+      "title": "Volumen general",
+      "description": "Volumen de ambos sonidos, de 0 a 100",
+      "default": 100,
+      "min": 0,
+      "max": 100
+    },
+    "smallVolume": {
+      "type": "number",
+      "title": "Volumen de las pequeñas",
+      "description": "Volumen del sonido de las mascotas pequeñas, en % del volumen general",
+      "default": 45,
+      "min": 0,
+      "max": 100
+    },
+    "customSound": {
+      "type": "file",
+      "title": "Audio propio",
+      "description": "Ruta a un .wav propio (solo en esta PC). La versión aguda se crea sola",
+      "default": ""
+    },
+    "mascotColor": {
+      "type": "string",
+      "title": "Color de la mascota",
+      "description": "Color hex, por ejemplo #D97757",
+      "default": "#D97757"
+    },
+    "laptopColor": {
+      "type": "string",
+      "title": "Color de la laptop",
+      "description": "Color hex, por ejemplo #C9C9C9 (el borde y la base salen más oscuros)",
+      "default": "#C9C9C9"
+    },
+    "aloneAlign": {
+      "type": "string",
+      "title": "Posición sin nada más en la franja",
+      "description": "Dónde van las mascotas cuando la franja no tiene nada más",
+      "options": [
+        "center",
+        "right",
+        "left"
+      ],
+      "default": "center"
+    },
+    "sharedSide": {
+      "type": "string",
+      "title": "Lado junto a otro contenido",
+      "description": "De qué lado van las mascotas si la franja tiene algo más (por ejemplo ponytail)",
+      "options": [
+        "right",
+        "left"
+      ],
+      "default": "right"
+    },
+    "miniSide": {
+      "type": "string",
+      "title": "Lado de las mascotas pequeñas",
+      "description": "A qué lado de la mascota grande van las pequeñas",
+      "options": [
+        "left",
+        "right"
+      ],
+      "default": "left"
+    }
+  }
+}
