@@ -26,4 +26,4 @@ function sting(base, length, file, amp = 1) {
 }
 const out = process.argv[2]
 sting(1046.5, 0.45, `${out}/alert.wav`)        // C6 then G6: this chat
-sting(1568, 0.3, `${out}/alert-small.wav`, 0.45)      // G6 then D7, shorter: other chats and subagents
+sting(1568, 0.3, `${out}/alert-small.wav`, 0.45)      // G6 then D7, shorter: subagents

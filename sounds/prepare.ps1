@@ -1,6 +1,6 @@
 # Makes the two alert sounds laptop-crew plays on Windows from one WAV:
 #   big.wav   the source at -Volume (this chat)
-#   small.wav the source resampled higher and shorter, at -Volume times -SmallVolume (other chats, subagents)
+#   small.wav the source resampled higher and shorter, at -Volume times -SmallVolume (subagents)
 # Only 16-bit PCM WAV is read: it is also all Windows' SoundPlayer plays.
 # shortcut: a plain PowerShell loop, a few seconds for a 30 s stereo clip; alert sounds are short.
 param(

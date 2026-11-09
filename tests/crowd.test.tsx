@@ -12,8 +12,8 @@ test('four busy helpers: three small ones and a +1, no label on the big one', as
   on('state.get', (_, e) => {
     const key = (e as unknown as { key: string }).key
     const value = key === 'local'
-      ? [{ id: 'main', label: 'Este chat', status: 'working' }, agent('a1'), agent('a2'), agent('a3')]
-      : [agent('chat1')]
+      ? [{ id: 'main', label: 'Este chat', status: 'working' }, agent('a1'), agent('a2'), agent('a3'), agent('a4')]
+      : null
     return { value: { value, version: 1 } }
   })
   const ui = await $.ui.mount(BAND)

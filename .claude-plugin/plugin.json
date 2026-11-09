@@ -1,6 +1,6 @@
 {
   "name": "laptop-crew",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Panel con la mascota de Claude trabajando en una laptop: una por chat y subagente, con un ! rojo cuando terminan",
   "author": {
     "name": "RaulRangelxD"
@@ -24,7 +24,7 @@
     "maxSmall": {
       "type": "number",
       "title": "Mascotas pequeñas",
-      "description": "Cuántas mascotas pequeñas mostrar (subagentes y otros chats). 0: solo este chat",
+      "description": "Cuántas mascotas pequeñas mostrar (subagentes de este chat). 0: solo este chat",
       "default": 3,
       "min": 0,
       "max": 3
@@ -97,7 +97,7 @@
     "compact": {
       "type": "boolean",
       "title": "Modo compacto",
-      "description": "Este chat como mascota pequeña y los demás como un número al lado, para una franja más baja",
+      "description": "Este chat como mascota pequeña y sus subagentes como un número al lado, para una franja más baja",
       "default": false
     },
     "band": {

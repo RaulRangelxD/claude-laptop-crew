@@ -24,7 +24,7 @@ test('maxSmall 0: only this chat, even with others busy', { options: { maxSmall:
   engine(on)
   on('state.get', (_, e) => {
     const key = (e as unknown as { key: string }).key
-    const value = key === 'local' ? [{ id: 'main', label: 'Este chat', status: 'working' }, agent('a1')] : [agent('c1')]
+    const value = key === 'local' ? [{ id: 'main', label: 'Este chat', status: 'working' }, agent('a1')] : null
     return { value: { value, version: 1 } }
   })
   const ui = await $.ui.mount(BAND)

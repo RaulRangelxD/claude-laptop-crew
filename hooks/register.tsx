@@ -5,15 +5,11 @@ import type { Worker } from '../types'
 import { fromBase64, pitchWav, toBase64 } from './wav'
 
 const local = atom({ plugin: 'laptop-crew', key: 'local' } as const, [] as Worker[])
-const chats = atom({ plugin: 'laptop-crew', key: 'chats' } as const, [] as Worker[])
 const doneRow = atom({ plugin: 'laptop-crew', key: 'doneRow' } as const, null as string | null)
 const demoRow = atom({ plugin: 'laptop-crew', key: 'demoRow' } as const, null as { id: string; kind: 'working' | 'done' } | null)
 
 const PANE = 'crew'
 const MAIN = 'main'
-const POLL_MS = 3000
-// shortcut: a chat that crashed without writing 'gone' shows until its file is 2h old.
-const STALE_MS = 2 * 60 * 60 * 1000
 const MASCOT_COLOR = '#D97757'
 const LAPTOP_COLOR = '#C9C9C9'
 /** One figure's box: 84 wide, 64 tall, the "!" kept inside it (top) down to the laptop's base. */
@@ -94,10 +90,6 @@ function readConfig(o: PluginOptions): Config {
 
 // Module state: starts over on a hot reload, which register and session.start set up again.
 let cfg = readConfig({})
-let timer: { cancel: () => void } | undefined
-let dir: string | undefined
-let file: string | undefined
-let lastChats = ''
 /** Where the sounds Windows plays are prepared (big.wav, small.wav), once they are ready. */
 let soundDir: string | undefined
 let soundsReady = false
@@ -181,41 +173,6 @@ async function setLocal($: EngineInterface, id: string, patch: Partial<Worker>) 
     if (i < 0) return [...list, { id, label: patch.label ?? id, status: 'idle' as const, ...patch }]
     return list.map((w, j) => (j === i ? { ...w, ...patch } : w))
   })
-}
-
-/** Writes this chat's status where the other chats' copies of the mod read it. */
-async function publish($: EngineInterface, status: Worker['status'] | 'gone') {
-  if (!file) return
-  const root = await $.session.root()
-  const label = root.split(/[\\/]/).filter(Boolean).pop() ?? 'chat'
-  await $.fs.write(file, JSON.stringify({ label, status, at: await $.clock.now() })).catch(() => {})
-}
-
-async function poll($: EngineInterface) {
-  if (!dir || !(await $.fs.exists(dir))) return
-  const now = await $.clock.now()
-  const mine = file?.split('/').pop()
-  const found: Worker[] = []
-  for (const entry of await $.fs.list(dir)) {
-    if (!entry.name.endsWith('.json') || entry.name === mine || now - entry.mtimeMs > STALE_MS) continue
-    try {
-      const v = JSON.parse(await $.fs.read(`${dir}/${entry.name}`)) as { label: string; status: string; at: number }
-      const id = entry.name.slice(0, -5)
-      // Another chat's "!" ages out on its own timestamp, within one poll of the alert time.
-      if (v.status === 'working' || (v.status === 'done' && now - v.at < cfg.alertMs)) {
-        found.push({ id, label: v.label, status: v.status, at: v.at })
-      }
-    } catch {
-      // a file mid-write reads as broken JSON: the next poll gets it
-    }
-  }
-  const key = JSON.stringify(found)
-  if (key === lastChats) return
-  lastChats = key
-  const before = await read($, chats)
-  // Only a chat seen working and now done chimes: a "!" already there at startup stays quiet.
-  if (found.some(w => w.status === 'done' && before.find(b => b.id === w.id)?.status === 'working')) chime($, true)
-  await update($, chats, () => found)
 }
 
 const isWindows = (root: string) => /^[A-Za-z]:[\\/]/.test(root)
@@ -397,7 +354,7 @@ async function saveColor($: EngineInterface, field: string, text: string, fallba
   await saveOption($, field, color)
 }
 
-// Previews for the /crew panel: they change only this window's mascots, never what other chats read.
+// Previews for the /crew panel: they change only this window's mascots.
 const DEMO = 'demo:'
 const isDemo = (w: Worker) => w.id.startsWith(DEMO)
 
@@ -497,7 +454,6 @@ async function endAlert($: EngineInterface, id: string, at: number) {
   if (w?.status !== 'done' || w.at !== at) return
   if (id === MAIN) {
     await setLocal($, MAIN, { status: 'idle' })
-    await publish($, 'idle')
   } else {
     await update($, local, list => list.filter(one => one.id !== id))
   }
@@ -509,17 +465,10 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME'))
     if (home) {
-      dir = `${home.replace(/\\/g, '/')}/.claude/laptop-crew`
-      file = `${dir}/${await $.session.id()}.json`
       soundDir = `${home.replace(/\\/g, '/')}/.claude/laptop-crew-sounds`
     }
     await setLocal($, MAIN, { label: 'Este chat', status: 'idle' })
-    await publish($, 'idle')
-    timer?.cancel()
-    timer = undefined
-    // 0 small mascots: only this chat matters, so nobody else is watched.
-    if (cfg.maxSmall > 0) timer = $.clock.every(POLL_MS, () => void poll($).catch(() => {}))
-    else await update($, local, list => list.filter(w => w.id === MAIN))
+    if (cfg.maxSmall === 0) await update($, local, list => list.filter(w => w.id === MAIN))
     if (cfg.sound) void prepareSounds($).catch(() => {})
     if (cfg.sound && cfg.volume > 0) void startPlayer($, (await $.session.id()).slice(0, 12)).catch(() => {})
     // The side pane of earlier versions: the mascots live in the band now.
@@ -694,12 +643,6 @@ export const register: Register = (on, options) => {
     )
   })
 
-  on('session.end', async ($, e, next) => {
-    timer?.cancel()
-    await publish($, 'gone')
-    return next(e)
-  })
-
   on('prompt.submit', async ($, e, next) => {
     // A new prompt means the person saw the result: drop finished subagents.
     await update($, local, list => list.filter(w => w.id === MAIN || w.status !== 'done'))
@@ -709,7 +652,6 @@ export const register: Register = (on, options) => {
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
       await setLocal($, MAIN, { status: 'working' })
-      await publish($, 'working')
     } else if (cfg.maxSmall > 0) {
       const info = (await $.agent.list()).find(a => a.id === e.agentId)
       await setLocal($, e.agentId, { label: info?.description || info?.type || 'subagente', status: 'working' })
@@ -723,7 +665,6 @@ export const register: Register = (on, options) => {
     const status: Worker['status'] = e.reason === 'aborted' ? 'idle' : 'done'
     const at = await $.clock.now()
     await setLocal($, id, { status, at })
-    if (id === MAIN) await publish($, status)
     if (status === 'done') chime($, id !== MAIN)
     if (status === 'done') $.clock.after(cfg.alertMs, () => void endAlert($, id, at).catch(() => {}))
     if (status === 'done' && id === MAIN) await placeDoneRow($, at)
@@ -738,6 +679,8 @@ export const register: Register = (on, options) => {
     if (!('Svg' in ui)) return own
     const { Box, Svg } = ui
     const art = figureSvg({ id: MAIN, label: '', status: 'working' }, true)
+    // The desktop app shows this while thinking or responding; while a tool runs it draws the
+    // indicator its own way and the mascot is not shown (seen in Claude Code 2.1.317).
     return (
       <Box flexDirection="row" alignItems="center" gap="sm">
         <Svg source={art.source} alt="Claude trabajando" width={art.width} height={art.height} isInteractive />
@@ -781,8 +724,8 @@ export const register: Register = (on, options) => {
     const main = mine.find(w => w.id === MAIN)
     // Before session.start has seated this chat's mascot there is nothing to draw.
     if (!main) return below
-    // Everyone else busy or just finished: subagents first, then other chats; alerts lead.
-    const others = [...mine.filter(w => w.id !== MAIN), ...(await read($, chats))]
+    // This chat's subagents, busy or just finished; alerts lead.
+    const others = mine.filter(w => w.id !== MAIN)
       .filter(w => w.status !== 'idle')
       .sort((a, b) => Number(b.status === 'done') - Number(a.status === 'done'))
     const shown = others.slice(0, cfg.maxSmall)
